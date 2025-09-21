@@ -3,15 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Language Tutor</title>
+    <title>English-Somali Tutor</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
         body {
             font-family: 'Inter', sans-serif;
-            background-color: #f3f4f6;
+            background-color: #f0f4f8;
             display: flex;
             justify-content: center;
             align-items: center;
@@ -35,11 +34,13 @@
             display: flex;
             flex-direction: column;
             gap: 1rem;
+            scroll-behavior: smooth;
         }
         .message {
             max-width: 85%;
             padding: 0.75rem 1rem;
             border-radius: 1rem;
+            word-wrap: break-word;
         }
         .ai-message {
             background-color: #e5e7eb;
@@ -51,6 +52,11 @@
             color: white;
             align-self: flex-end;
             border-bottom-right-radius: 0;
+        }
+        .message-content {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
         }
         .input-area {
             display: flex;
@@ -70,15 +76,29 @@
         }
         .input-area button {
             margin-left: 0.75rem;
-            background-color: #3b82f6;
-            color: white;
             border-radius: 0.75rem;
             padding: 0.75rem 1.25rem;
             font-weight: 500;
             transition: background-color 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 48px;
+            min-width: 48px;
         }
-        .input-area button:hover {
+        #send-button {
+            background-color: #3b82f6;
+            color: white;
+        }
+        #send-button:hover {
             background-color: #2563eb;
+        }
+        #speak-button {
+            background-color: #9ca3af;
+            color: white;
+        }
+        #speak-button:hover {
+            background-color: #6b7280;
         }
         .loading-dots {
             display: flex;
@@ -96,151 +116,378 @@
         }
         .loading-dot:nth-child(2) { animation-delay: 0.2s; }
         .loading-dot:nth-child(3) { animation-delay: 0.4s; }
-
         @keyframes bounce {
             0%, 100% { transform: translateY(0); }
             50% { transform: translateY(-5px); }
+        }
+        .error-message {
+            position: fixed;
+            bottom: 2rem;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: #f87171;
+            color: white;
+            padding: 1rem 1.5rem;
+            border-radius: 0.5rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            z-index: 1000;
+            display: none;
+            text-align: center;
         }
     </style>
 </head>
 <body class="bg-gray-100">
 
     <div class="container">
-        <header class="bg-blue-600 text-white p-4 text-center rounded-t-xl shadow-md">
-            <h1 class="text-2xl font-bold">Your English Tutor</h1>
-            <p class="text-sm opacity-80 mt-1">Chat to start your lesson on greetings and introductions.</p>
+        <header class="bg-gray-800 text-white p-4 text-center rounded-t-xl shadow-md flex justify-between items-center">
+            <h1 class="text-xl font-bold">English-Somali Tutor</h1>
+            <div class="text-sm font-light">User ID: <span id="userIdDisplay"></span></div>
         </header>
 
         <div id="chat-box" class="chat-box">
-            <!-- Initial AI message -->
-            <div class="message ai-message">
-                Hello! My name is Axmed. I am learning English and want to practice. Can you introduce yourself?
-            </div>
+            <!-- Initial AI message will be added dynamically -->
         </div>
 
-        <div class="input-area">
-            <input type="text" id="user-input" placeholder="Type your message...">
-            <button id="send-button">Send</button>
+        <div class="p-4 bg-gray-200 rounded-b-2xl">
+            <div id="loading-dots" class="flex justify-center items-center space-x-2 mb-2 hidden">
+                <div class="loading-dots">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </div>
+                <p class="text-gray-600">Tutor is typing...</p>
+            </div>
+            <div class="flex items-center space-x-2">
+                <input type="text" id="user-input" placeholder="Type your message here..." class="flex-1 p-3 rounded-xl border border-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-500 transition-all">
+                <button id="send-button" class="bg-gray-800 text-white p-3 rounded-xl hover:bg-gray-700 transition-colors shadow-md">
+                    <i class="fas fa-paper-plane"></i>
+                </button>
+                <button id="speak-button" class="bg-blue-500 text-white p-3 rounded-xl hover:bg-blue-600 transition-colors shadow-md">
+                    <i class="fas fa-microphone"></i>
+                </button>
+            </div>
+            <div class="text-xs text-gray-500 mt-2 text-center">
+              The 'Microphone' button is a simulator. Type your response, then click 'Send'.
+            </div>
         </div>
     </div>
 
+    <!-- Message box for alerts -->
+    <div id="message-box" class="error-message"></div>
+
+    <!-- Firebase SDKs -->
     <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, onSnapshot, collection, query, orderBy, addDoc, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Firebase and app configuration
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        // API Keys (auto-provided by canvas)
+        const geminiApiKey = "";
+
+        // UI elements
+        const chatBox = document.getElementById('chat-box');
         const userInput = document.getElementById('user-input');
         const sendButton = document.getElementById('send-button');
-        const chatBox = document.getElementById('chat-box');
-        const apiKey = "";
-        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
-        
-        // This is where we define the "lesson plan" and the model's persona
-        const systemPrompt = `You are a helpful and patient English tutor for a Somali-speaking student. The student's name is Axmed, and he is a beginner. Your responses should be simple, clear, and encouraging.
-        
-        This lesson is about greetings and introductions. Guide Axmed through a short, natural conversation.
-        
-        The conversation should flow like this:
-        1. Axmed says "I want to practice my English." or something similar.
-        2. You introduce yourself.
-        3. You ask Axmed for his name.
-        4. The conversation continues with simple questions about his day, where he is from, etc.
-        
-        If Axmed makes a grammatical error, politely correct it and provide the correct sentence. For example, if he says "I am from Mogadishu," you can say "That's great! The correct way to say that is 'I am from Mogadishu.' In English, we use 'I am' before the city name."
-        
-        Keep your responses short and natural.`;
-        
-        let conversationHistory = [];
+        const speakButton = document.getElementById('speak-button');
+        const loadingDots = document.getElementById('loading-dots');
+        const userIdDisplay = document.getElementById('userIdDisplay');
+        const messageBox = document.getElementById('message-box');
 
-        function addMessage(text, sender) {
+        // State variables
+        let isWaitingForResponse = false;
+        let auth, db, userId;
+
+        // Helper function to show temporary messages
+        function showMessage(text, isError = false) {
+            messageBox.textContent = text;
+            messageBox.style.display = 'block';
+            if (isError) {
+                messageBox.style.backgroundColor = '#f87171';
+            } else {
+                messageBox.style.backgroundColor = '#2563eb';
+            }
+            setTimeout(() => {
+                messageBox.style.display = 'none';
+            }, 3000);
+        }
+
+        // Add a message to the UI
+        function addMessage(text, sender, isAudio = false) {
             const messageDiv = document.createElement('div');
             messageDiv.classList.add('message', sender === 'user' ? 'user-message' : 'ai-message');
-            messageDiv.textContent = text;
+            const contentDiv = document.createElement('div');
+            contentDiv.classList.add('message-content');
+            contentDiv.innerHTML = `<p>${text}</p>`;
+
+            if (sender === 'ai' && isAudio) {
+                const playButton = document.createElement('button');
+                playButton.innerHTML = `<i class="fas fa-volume-up"></i>`;
+                playButton.classList.add('ml-2', 'text-sm', 'bg-gray-200', 'text-gray-800', 'p-1', 'rounded-full', 'hover:bg-gray-300', 'transition-colors');
+                playButton.onclick = () => playTextAsAudio(text);
+                contentDiv.prepend(playButton);
+            }
+
+            messageDiv.appendChild(contentDiv);
             chatBox.appendChild(messageDiv);
             chatBox.scrollTop = chatBox.scrollHeight;
         }
 
-        async function sendMessage() {
-            const userText = userInput.value.trim();
-            if (userText === '') return;
+        // Function to play text as audio using the TTS API
+        async function playTextAsAudio(text) {
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${geminiApiKey}`;
+            const payload = {
+                contents: [{ parts: [{ text: text }] }],
+                generationConfig: {
+                    responseModalities: ["AUDIO"],
+                    speechConfig: {
+                        voiceConfig: { prebuiltVoiceConfig: { voiceName: "Puck" } } // A clear, upbeat voice
+                    }
+                },
+                model: "gemini-2.5-flash-preview-tts"
+            };
 
-            addMessage(userText, 'user');
-            userInput.value = '';
+            let audio = null;
+            try {
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
 
-            const loadingMessage = document.createElement('div');
-            loadingMessage.classList.add('message', 'ai-message');
-            loadingMessage.innerHTML = '<div class="loading-dots"><div class="loading-dot"></div><div class="loading-dot"></div><div class="loading-dot"></div></div>';
-            chatBox.appendChild(loadingMessage);
-            chatBox.scrollTop = chatBox.scrollHeight;
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
 
-            conversationHistory.push({ role: 'user', parts: [{ text: userText }] });
+                const result = await response.json();
+                const part = result?.candidates?.[0]?.content?.parts?.[0];
+                const audioData = part?.inlineData?.data;
+                const mimeType = part?.inlineData?.mimeType;
+
+                if (audioData && mimeType && mimeType.startsWith("audio/")) {
+                    const sampleRate = parseInt(mimeType.match(/rate=(\d+)/)[1], 10);
+                    const pcmData = base64ToArrayBuffer(audioData);
+                    const pcm16 = new Int16Array(pcmData);
+                    const wavBlob = pcmToWav(pcm16, sampleRate);
+                    const audioUrl = URL.createObjectURL(wavBlob);
+                    audio = new Audio(audioUrl);
+                    audio.play().catch(e => console.error("Error playing audio:", e));
+                } else {
+                    showMessage("Failed to retrieve audio data.", true);
+                    console.error("Failed to retrieve audio data from API response:", result);
+                }
+            } catch (error) {
+                showMessage("Failed to generate audio. Please try again.", true);
+                console.error("Error during TTS API call:", error);
+            }
+        }
+
+        // Helper functions for TTS audio conversion
+        function base64ToArrayBuffer(base64) {
+            const binary_string = window.atob(base64);
+            const len = binary_string.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) {
+                bytes[i] = binary_string.charCodeAt(i);
+            }
+            return bytes.buffer;
+        }
+
+        function pcmToWav(pcmData, sampleRate) {
+            const buffer = new ArrayBuffer(44 + pcmData.byteLength);
+            const view = new DataView(buffer);
+            writeString(view, 0, 'RIFF'); // RIFF identifier
+            view.setUint32(4, 36 + pcmData.byteLength, true); // file length
+            writeString(view, 8, 'WAVE'); // RIFF type
+            writeString(view, 12, 'fmt '); // format chunk identifier
+            view.setUint32(16, 16, true); // format chunk length
+            view.setUint16(20, 1, true); // sample format (1 = PCM)
+            view.setUint16(22, 1, true); // number of channels
+            view.setUint32(24, sampleRate, true); // sample rate
+            view.setUint32(28, sampleRate * 2, true); // byte rate
+            view.setUint16(32, 2, true); // block align
+            view.setUint16(34, 16, true); // bits per sample
+            writeString(view, 36, 'data'); // data chunk identifier
+            view.setUint32(40, pcmData.byteLength, true); // data chunk length
+            const pcmBytes = new Int16Array(buffer, 44);
+            pcmBytes.set(pcmData);
+            return new Blob([view], { type: 'audio/wav' });
+        }
+
+        function writeString(view, offset, string) {
+            for (let i = 0; i < string.length; i++) {
+                view.setUint8(offset + i, string.charCodeAt(i));
+            }
+        }
+
+        // Function to call the Gemini LLM API
+        async function getTutorResponse(chatHistory) {
+            if (isWaitingForResponse) return;
+            isWaitingForResponse = true;
+            loadingDots.classList.remove('hidden');
+
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${geminiApiKey}`;
+            const systemPrompt = `You are a friendly and encouraging language tutor for Somali speakers learning English. Your name is 'Abdi'.
+            - Your first language is Somali, and you are fluent in English.
+            - Start the conversation in Somali to make the user feel comfortable. Greet them and ask their name to begin the assessment.
+            - Assess the user's English proficiency based on their responses. Start with simple questions in Somali to gauge their understanding.
+            - Gradually introduce more English into the conversation as their proficiency improves.
+            - Only use Somali to explain difficult concepts or when the user seems confused.
+            - Your responses should be short, conversational, and helpful.
+            - Do not provide direct translations unless asked. Instead, provide simple explanations and context.
+            - Encourage the user to speak/write in English as much as possible.`;
+
+            const contents = chatHistory.map(msg => ({
+                role: msg.sender === 'user' ? 'user' : 'model',
+                parts: [{ text: msg.text }]
+            }));
 
             const payload = {
-                contents: [
-                    { role: "user", parts: [{ text: systemPrompt }] },
-                    ...conversationHistory
-                ]
+                contents,
+                tools: [{ "google_search": {} }],
+                systemInstruction: { parts: [{ text: systemPrompt }] },
             };
-            
-            // To ensure the conversation flows correctly without the system prompt being repeated
-            // for the model's benefit, we will only send a trimmed version of the history
-            // for future calls, keeping the system prompt in the initial call.
-            const conversationForNextPrompt = [...conversationHistory];
 
             let maxRetries = 3;
             let retryCount = 0;
-            let successfulResponse = false;
-            
-            while (retryCount < maxRetries && !successfulResponse) {
+            let responseReceived = false;
+
+            while (retryCount < maxRetries && !responseReceived) {
                 try {
-                    const response = await fetch(apiUrl, {
+                    const response = await fetch(url, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(payload)
                     });
 
+                    if (response.status === 429) {
+                        const delay = Math.pow(2, retryCount) * 1000;
+                        await new Promise(res => setTimeout(res, delay));
+                        retryCount++;
+                        continue;
+                    }
+
                     if (!response.ok) {
-                        if (response.status === 429) { // Too many requests
-                            const delay = Math.pow(2, retryCount) * 1000;
-                            console.log(`Rate limit hit. Retrying in ${delay}ms...`);
-                            await new Promise(res => setTimeout(res, delay));
-                            retryCount++;
-                            continue;
-                        }
                         throw new Error(`API call failed with status: ${response.status}`);
                     }
 
                     const result = await response.json();
-                    const candidate = result.candidates?.[0];
-                    const aiResponse = candidate?.content?.parts?.[0]?.text;
+                    const tutorResponse = result?.candidates?.[0]?.content?.parts?.[0]?.text;
 
-                    chatBox.removeChild(loadingMessage);
-                    if (aiResponse) {
-                        addMessage(aiResponse, 'ai');
-                        conversationHistory.push({ role: 'model', parts: [{ text: aiResponse }] });
-                        // Trim history to prevent it from getting too long
-                        if (conversationHistory.length > 20) {
-                             conversationHistory.splice(0, conversationHistory.length - 20);
-                        }
+                    if (tutorResponse) {
+                        await addDoc(collection(db, `artifacts/${appId}/users/${userId}/messages`), {
+                            text: tutorResponse,
+                            sender: 'ai',
+                            timestamp: Date.now()
+                        });
+                        responseReceived = true;
                     } else {
-                        addMessage('Sorry, I couldn\'t get a response. Please try again.', 'ai');
+                        showMessage("Received an empty response from the tutor. Trying again...", true);
+                        retryCount++;
                     }
-                    successfulResponse = true;
 
                 } catch (error) {
-                    console.error('Error during API call:', error);
-                    if (retryCount >= maxRetries - 1) {
-                         chatBox.removeChild(loadingMessage);
-                         addMessage('Sorry, an error occurred. Please check your network and try again.', 'ai');
-                    }
+                    console.error("Error fetching tutor response:", error);
+                    showMessage("An error occurred. Trying again...", true);
                     retryCount++;
                 }
             }
+
+            if (!responseReceived) {
+                showMessage("Failed to get a response after several attempts. Please try again later.", true);
+            }
+            isWaitingForResponse = false;
+            loadingDots.classList.add('hidden');
         }
 
-        sendButton.addEventListener('click', sendMessage);
+        // Handle sending messages
+        sendButton.addEventListener('click', async () => {
+            const text = userInput.value.trim();
+            if (text === '') return;
+            userInput.value = '';
+            await addDoc(collection(db, `artifacts/${appId}/users/${userId}/messages`), {
+                text: text,
+                sender: 'user',
+                timestamp: Date.now()
+            });
+        });
+
+        // The speak button will simulate text input
+        speakButton.addEventListener('click', () => {
+             userInput.focus();
+        });
+
         userInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
-                sendMessage();
+                sendButton.click();
             }
         });
-    </script>
 
+        // Initialize Firebase and set up auth listener
+        async function initialize() {
+            setLogLevel('debug');
+            const app = initializeApp(firebaseConfig);
+            auth = getAuth(app);
+            db = getFirestore(app);
+
+            onAuthStateChanged(auth, async (user) => {
+                if (user) {
+                    userId = user.uid;
+                    userIdDisplay.textContent = userId;
+                    console.log("Authenticated with user ID:", userId);
+
+                    // Set up Firestore listener for messages
+                    const messagesRef = collection(db, `artifacts/${appId}/users/${userId}/messages`);
+                    const q = query(messagesRef, orderBy('timestamp'));
+
+                    onSnapshot(q, async (snapshot) => {
+                        snapshot.docChanges().forEach(change => {
+                            const data = change.doc.data();
+                            if (change.type === "added") {
+                                addMessage(data.text, data.sender, data.sender === 'ai');
+                            }
+                        });
+
+                        const messages = await getDocs(q);
+                        if (messages.empty) {
+                            // First time user, send the initial message to trigger conversation
+                            addDoc(collection(db, `artifacts/${appId}/users/${userId}/messages`), {
+                                text: 'Hello! Waa maxay magacaa?',
+                                sender: 'ai',
+                                timestamp: Date.now()
+                            });
+                        }
+
+                        // Check if we need to get a new response from the AI
+                        const lastMessage = snapshot.docs[snapshot.docs.length - 1]?.data();
+                        if (lastMessage && lastMessage.sender === 'user') {
+                            const chatHistory = messages.docs.map(doc => doc.data());
+                            getTutorResponse(chatHistory);
+                        }
+                    });
+
+                } else {
+                    console.log("Signing in anonymously...");
+                    try {
+                        if (initialAuthToken) {
+                            await signInWithCustomToken(auth, initialAuthToken);
+                        } else {
+                            await signInAnonymously(auth);
+                        }
+                    } catch (error) {
+                        console.error("Error signing in:", error);
+                        showMessage("Failed to authenticate. Please try again.", true);
+                    }
+                }
+            });
+        }
+
+        window.onload = initialize;
+    </script>
 </body>
 </html>
