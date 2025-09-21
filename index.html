@@ -145,7 +145,7 @@
         </header>
 
         <div id="chat-box" class="chat-box">
-            <!-- Initial AI message will be added dynamically -->
+            <!-- Messages will be added dynamically by the JavaScript -->
         </div>
 
         <div class="p-4 bg-gray-200 rounded-b-2xl">
@@ -166,8 +166,8 @@
                     <i class="fas fa-microphone"></i>
                 </button>
             </div>
-            <div class="text-xs text-gray-500 mt-2 text-center">
-              The 'Microphone' button is a simulator. Type your response, then click 'Send'.
+            <div id="speech-status" class="text-xs text-gray-500 mt-2 text-center">
+              Click the microphone to speak!
             </div>
         </div>
     </div>
@@ -179,7 +179,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, onSnapshot, collection, query, orderBy, addDoc, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, onSnapshot, collection, query, orderBy, addDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // Firebase and app configuration
@@ -198,10 +198,12 @@
         const loadingDots = document.getElementById('loading-dots');
         const userIdDisplay = document.getElementById('userIdDisplay');
         const messageBox = document.getElementById('message-box');
+        const speechStatus = document.getElementById('speech-status');
 
         // State variables
         let isWaitingForResponse = false;
         let auth, db, userId;
+        let recognition = null; // for the speech recognition API
 
         // Helper function to show temporary messages
         function showMessage(text, isError = false) {
@@ -246,7 +248,7 @@
                 generationConfig: {
                     responseModalities: ["AUDIO"],
                     speechConfig: {
-                        voiceConfig: { prebuiltVoiceConfig: { voiceName: "Puck" } } // A clear, upbeat voice
+                        voiceConfig: { prebuiltVoiceConfig: { voiceName: "Puck" } }
                     }
                 },
                 model: "gemini-2.5-flash-preview-tts"
@@ -301,19 +303,19 @@
         function pcmToWav(pcmData, sampleRate) {
             const buffer = new ArrayBuffer(44 + pcmData.byteLength);
             const view = new DataView(buffer);
-            writeString(view, 0, 'RIFF'); // RIFF identifier
-            view.setUint32(4, 36 + pcmData.byteLength, true); // file length
-            writeString(view, 8, 'WAVE'); // RIFF type
-            writeString(view, 12, 'fmt '); // format chunk identifier
-            view.setUint32(16, 16, true); // format chunk length
-            view.setUint16(20, 1, true); // sample format (1 = PCM)
-            view.setUint16(22, 1, true); // number of channels
-            view.setUint32(24, sampleRate, true); // sample rate
-            view.setUint32(28, sampleRate * 2, true); // byte rate
-            view.setUint16(32, 2, true); // block align
-            view.setUint16(34, 16, true); // bits per sample
-            writeString(view, 36, 'data'); // data chunk identifier
-            view.setUint32(40, pcmData.byteLength, true); // data chunk length
+            writeString(view, 0, 'RIFF');
+            view.setUint32(4, 36 + pcmData.byteLength, true);
+            writeString(view, 8, 'WAVE');
+            writeString(view, 12, 'fmt ');
+            view.setUint32(16, 16, true);
+            view.setUint16(20, 1, true);
+            view.setUint16(22, 1, true);
+            view.setUint32(24, sampleRate, true);
+            view.setUint32(28, sampleRate * 2, true);
+            view.setUint16(32, 2, true);
+            view.setUint16(34, 16, true);
+            writeString(view, 36, 'data');
+            view.setUint32(40, pcmData.byteLength, true);
             const pcmBytes = new Int16Array(buffer, 44);
             pcmBytes.set(pcmData);
             return new Blob([view], { type: 'audio/wav' });
@@ -417,10 +419,50 @@
             });
         });
 
-        // The speak button will simulate text input
-        speakButton.addEventListener('click', () => {
-             userInput.focus();
-        });
+        // Speech recognition logic
+        if ('webkitSpeechRecognition' in window) {
+            recognition = new webkitSpeechRecognition();
+            recognition.continuous = false;
+            recognition.interimResults = false;
+            recognition.lang = 'en-US';
+
+            recognition.onstart = () => {
+                speechStatus.textContent = 'Speaking...';
+                speakButton.classList.add('bg-red-500', 'hover:bg-red-600');
+                speakButton.classList.remove('bg-blue-500', 'hover:bg-blue-600');
+            };
+
+            recognition.onresult = (event) => {
+                const transcript = event.results[0][0].transcript;
+                userInput.value = transcript;
+                speechStatus.textContent = 'Click the microphone to speak!';
+                speakButton.classList.add('bg-blue-500', 'hover:bg-blue-600');
+                speakButton.classList.remove('bg-red-500', 'hover:bg-red-600');
+            };
+
+            recognition.onerror = (event) => {
+                console.error('Speech recognition error:', event.error);
+                speechStatus.textContent = 'Error. Click to try again.';
+                speakButton.classList.add('bg-blue-500', 'hover:bg-blue-600');
+                speakButton.classList.remove('bg-red-500', 'hover:bg-red-600');
+            };
+
+            recognition.onend = () => {
+                speechStatus.textContent = 'Click the microphone to speak!';
+                speakButton.classList.add('bg-blue-500', 'hover:bg-blue-600');
+                speakButton.classList.remove('bg-red-500', 'hover:bg-red-600');
+            };
+
+            speakButton.addEventListener('click', () => {
+                if (recognition) {
+                    recognition.start();
+                }
+            });
+        } else {
+            speakButton.style.display = 'none';
+            speechStatus.textContent = 'Speech recognition not supported in this browser.';
+        }
+
 
         userInput.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') {
@@ -446,27 +488,41 @@
                     const q = query(messagesRef, orderBy('timestamp'));
 
                     onSnapshot(q, async (snapshot) => {
+                        let chatHistory = [];
+                        snapshot.docs.forEach(doc => {
+                            const data = doc.data();
+                            chatHistory.push(data);
+                        });
+
+                        // Clear existing messages and render the full history to avoid duplicates
+                        chatBox.innerHTML = '';
+                        chatHistory.forEach(msg => {
+                            addMessage(msg.text, msg.sender, msg.sender === 'ai');
+                        });
+
+                        // Check for new messages and play audio if from AI
                         snapshot.docChanges().forEach(change => {
-                            const data = change.doc.data();
-                            if (change.type === "added") {
-                                addMessage(data.text, data.sender, data.sender === 'ai');
+                            if (change.type === 'added') {
+                                const newMessage = change.doc.data();
+                                if (newMessage.sender === 'ai') {
+                                    playTextAsAudio(newMessage.text);
+                                }
                             }
                         });
 
-                        const messages = await getDocs(q);
-                        if (messages.empty) {
+
+                        if (snapshot.empty) {
                             // First time user, send the initial message to trigger conversation
                             addDoc(collection(db, `artifacts/${appId}/users/${userId}/messages`), {
-                                text: 'Hello! Waa maxay magacaa?',
+                                text: 'Hello! Waa maxay magacaa? ',
                                 sender: 'ai',
                                 timestamp: Date.now()
                             });
                         }
 
                         // Check if we need to get a new response from the AI
-                        const lastMessage = snapshot.docs[snapshot.docs.length - 1]?.data();
-                        if (lastMessage && lastMessage.sender === 'user') {
-                            const chatHistory = messages.docs.map(doc => doc.data());
+                        const lastMessage = chatHistory[chatHistory.length - 1];
+                        if (lastMessage && lastMessage.sender === 'user' && !isWaitingForResponse) {
                             getTutorResponse(chatHistory);
                         }
                     });
